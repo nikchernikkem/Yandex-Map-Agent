@@ -38,10 +38,8 @@ retriever.index = faiss.read_index(str(INDEX_PATH))
 with META_PATH.open("r", encoding="utf-8") as f:
     retriever.meta = json.load(f)
 
-
 def make_retrieve_tool(retriever: FaissExampleRetriever):
-
-# Декоратор превращает функцию в Tool с именем, схемой аргументов и описанием
+    # Декоратор превращает функцию в Tool с именем, схемой аргументов и описанием
     @tool
     def retrieve_similar_examples(query: str, org_text: str, k: int = 5) -> str:
         """
@@ -53,13 +51,10 @@ def make_retrieve_tool(retriever: FaissExampleRetriever):
 
     return retrieve_similar_examples
 
-
-# -------------------------
-# 4) Пример использования без агента
-# -------------------------
+# Пример использования без агента
 # row = train_data.iloc[0]
 # org_text = make_org_text_from_row(row)
 # print(retriever.retrieve_similar_examples(row["Text"], org_text, k=5))
 
-
-tools = [search_tool, make_retrieve_tool(retriever)]
+rag_tool = make_retrieve_tool(retriever)
+tools = [search_tool, rag_tool]
