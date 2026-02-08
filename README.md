@@ -1,4 +1,8 @@
 # Yandex-Map-Agent
+[![Python](https://img.shields.io/badge/Python-%3E%3D3.12-blue.svg)](https://www.python.org/downloads/)
+[![LangChain](https://img.shields.io/badge/LangChain-%3E%3D0.3-green.svg)](https://python.langchain.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-%3E%3D0.1-green.svg)](https://python.langgraph.com/)
+
 
 Проект по созданию LLM‑агента, который оценивает релевантность организаций на Яндекс.Картах широким рубричным запросам (например, «ресторан с верандой» или «романтичный джаз‑бар»). Агент должен сам находить необходимые данные и принимать решение о релевантности.
 
@@ -10,20 +14,6 @@
 1. FAISS‑ретривер примеров на эмбеддингах `ai-forever/FRIDA`.
 1. Базовый скрипт TF‑IDF + CatBoost.
 
-**План работы**
-1. Сделать сильный бейзлайн: один LLM‑запрос с few‑shot примерами или обучение трансформера на классификацию.
-1. Разобраться с LangGraph и собрать каркас агента.
-1. Реализовать агента, который может обращаться к поисковой строке для уточнения ответа.
-1. Итеративно улучшать промпт, анализируя ошибки на train.
-1. Опционально:
-- ретривал похожих размеченных примеров из train;
-- инструмент парсинга сайтов как tool для агента.
-
-**Система оценивания**
-1. Бейзлайн без агента (LLM допустим) — 2 балла.
-1. Агент с возможностью обращения к поиску — 4 балла.
-1. Существенно обогнать бейзлайн (или честно показать отсутствие прироста от агента) — 4 балла.
-1. Опционально реализовать доп. идею — бонус.
 
 **Данные и постановка**
 - Цель: предсказать `relevance` по всем остальным полям организации.
@@ -37,27 +27,34 @@
 - Видео: https://www.youtube.com/watch?v=U6LbW2IFUQw
 - Данные: https://disk.yandex.ru/d/6d5hFHvpAZjQdw
 
-**Быстрый старт**
-1. Установите зависимости проекта (любым удобным способом).
-1. Скопируйте переменные окружения:
+**Структура проекта**
+- `src/agent.py` — граф LangGraph, сборка цепочки, запуск LLM‑агента.
+- `src/tools.py` — инструменты агента (Tavily Search и FAISS‑retriever).
+- `src/faiss_retriever.py` — загрузка индекса, поиск похожих примеров, форматирование выдачи.
+- `src/scripts/baseline_tfidf_catboost.py` — baseline: TF‑IDF + CatBoost, обучение и валидация.
+- `src/scripts/make_faiss_index.py` — построение FAISS‑индекса и метаданных (режимы split/full).
+- `src/scripts/run_prediction.py` — запуск экспериментов агента, логирование предсказаний в `logs/agent_runs/`.
 
-```bash
-cp .env.example .env
-```
+<br>
+<figure>
+  <p align="center">
+    <img src="images/Flow.png" width="370" />
+  </p>
+  <figcaption align="center">Структура агента</figcaption>
+</figure>
 
-3. Заполните ключи в `.env`.
-4. Запустите агента:
 
-```bash
-python src/agent.py
-```
+**Зачем агенту RAG‑тулза (FAISS-ретривер)**
+- Чтобы в сложных или пограничных случаях быстро подтянуть похожие размеченные примеры из трейна и использовать их как калибровку решения. Это снижает риск «галлюцинаций», дает более стабильные решения на неочевидных запросах и помогает придерживаться обученной логики меток. По факту это few‑shot.
+- Индекс строится по паре `QUERY + org_text`, где `org_text` включает `CITY` (первый компонент `address`), `normalized_main_rubric_name_ru`, `name`.
+
 
 **Переменные окружения**
 - `OPENAI_BASE_URL` — base URL для OpenAI‑compatible API.
 - `OPENAI_API_KEY` — ключ для модели.
 - `TAVILY_API_KEY` — ключ для Tavily Search.
 
-**План действий**
+**Что было сделано**
 1. Разделяю трейновый датасет: 98% — для построения FAISS‑индекса (RAG), 2% — для настройки агента (tune_split).
 2. Через GPT‑5.2 thinking выбираю 50 неоднозначных примеров из tune_split и прогоняю 3 стратегии:
 - без тулзов (`system_prompt_base.jinja`),
@@ -100,20 +97,18 @@ python src/scripts/make_faiss_index.py --artifacts-dir data/artifacts/faiss_full
 Запуск эксперимента агента:
 
 ```bash
-set FAISS_INDEX_DIR=data/artifacts/faiss_full
+export FAISS_INDEX_DIR=data/artifacts/faiss_split  
 python src/scripts/run_prediction.py --experiment no_tools --sample-size 50
 ```
 
 Полный прогон на всем val:
 
 ```bash
-set FAISS_INDEX_DIR=data/artifacts/faiss_split
+export FAISS_INDEX_DIR=data/artifacts/faiss_full
 python src/scripts/run_prediction.py --experiment web_search_rag --use-full
 ```
 
-**Структура**
-- `src/agent.py` — граф агента и запуск LLM.
-- `src/tools.py` — инструменты (Tavily + FAISS‑retriever).
-- `src/faiss_retriever.py` — логика ретривера.
-- `src/prompts/` — системные промпты для режимов no_tools/web_search/rag/web_search_rag.
-- `src/scripts/baseline_tfidf_catboost.py` — baseline классификации.
+**Результаты экспериментов**
+1. Baseline (TF-IDF + CatBoost, `baseline.ipynb`): val size = 500, accuracy = 0.8700, precision = 0.9013, recall = 0.8927, F1 = 0.8970.
+
+

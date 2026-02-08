@@ -1,12 +1,15 @@
-import numpy as np
-import pandas as pd
+"""
+FAISS-ретривер train-примеров для RAG.
+Формирует текстовые пары (query + org_text), кодирует их SentenceTransformer,
+строит FAISS IndexFlatIP по нормализованным эмбеддингам и возвращает top-k похожих.
+"""
 
+import numpy as np
+import pandas as pdы
 # FAISS
 import faiss
-
-# Embeddings (локально, без API)
+# Embeddings (локально)
 from sentence_transformers import SentenceTransformer
-
 
 # -------------------------
 # Утилиты подготовки текста

@@ -1,3 +1,17 @@
+"""
+Сборка и запуск LangGraph-агента с OpenAI-совместимой LLM и (опционально) тулзами.
+
+Что внутри:
+- Создает ChatOpenAI с `OPENAI_API_KEY` и `OPENAI_BASE_URL`.
+- Загружает системный промпт из `src/prompts/system_prompt_base.jinja`.
+- Описывает узлы графа: `agent` (вызов LLM) и `tools` (ToolNode).
+- Добавляет условный переход к тулзам, если модель запросила tool_calls.
+- Возвращает скомпилированный граф; в конце файла строится `graph`.
+
+Логи:
+- Подробные логи запросов/ответов и tool_calls через `logging`.
+"""
+
 import os
 import logging
 import sys
@@ -10,10 +24,9 @@ from langgraph.prebuilt import ToolNode
 from langchain_core.messages import SystemMessage
 
 from dotenv import load_dotenv
+load_dotenv()
 
 from src.tools import tools
-
-load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")

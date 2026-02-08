@@ -1,0 +1,1 @@
+{"experiment": "no_tools", "mode": "sample", "sample_size": 50, "total": 50, "metrics": {"total": 50, "parsed_ok": 49, "bad_parse": 1, "parsed_rate": 0.98, "accuracy": 0.3877551020408163, "f1_macro": 0.375, "precision_macro": 0.37456140350877193, "recall_macro": 0.3804347826086957}}

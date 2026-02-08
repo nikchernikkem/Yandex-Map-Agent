@@ -1,0 +1,1 @@
+{"experiment": "web_search_rag_strong", "mode": "sample", "sample_size": 50, "total": 50, "metrics": {"total": 50, "parsed_ok": 50, "bad_parse": 0, "parsed_rate": 1.0, "accuracy": 0.44, "f1_macro": 0.4363929146537842, "precision_macro": 0.4363929146537842, "recall_macro": 0.4363929146537842}}

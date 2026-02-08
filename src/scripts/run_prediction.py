@@ -1,3 +1,39 @@
+"""
+Запуск экспериментов агента на LangGraph с разными конфигурациями тулзов.
+Скрипт прогоняет валидированный набор (или его сэмпл), парсит ответы агента,
+считает метрики по успешно распарсенным предсказаниям и сохраняет
+построчные результаты и метрики в `logs/agent_runs`.
+
+Основные режимы:
+- sample (по умолчанию): берет `tune_split.jsonl`, фильтрует по
+  `tune_split_hard_examples.jsonl` (сформированные GPT‑5.2 неоднозначные примеры), 
+  затем выбирает `--sample-size`.
+- full: если задан `--use-full`, прогоняет весь датасет
+  `data/raw/data_final_for_dls_eval_new` (с фильтром `relevance_new != 0.1`).
+
+Выбор эксперимента:
+- `--experiment` выбирает набор тулзов из `EXPERIMENTS` (no_tools, web_search_rag, web_search_rag_strong)
+  и системный промпт из `PROMPT_FILES`.
+
+Ожидаемый вход:
+- JSONL валидации с полями: Text, name, address, normalized_main_rubric_name_ru,
+  prices_summarized, reviews_summarized, relevance_new.
+
+Выход:
+- `logs/agent_runs/{experiment}_{sample_size}_sample.jsonl` или
+  `logs/agent_runs/{experiment}_full.jsonl` — построчные ответы/парсинг.
+- `logs/agent_runs/{experiment}_{...}_metrics.jsonl` — сводные метрики.
+
+Метрики:
+- accuracy, macro F1, macro precision/recall считаются только
+  по успешно распарсенным ответам.
+- Дополнительно сохраняются `parsed_rate` и `bad_parse`.
+
+Примечания:
+- Ответ агента ожидается как JSON с полем `relevance` (0/1).
+- Для нестабильных вызовов используется повтор (`MAX_RETRIES`).
+"""
+
 import argparse
 import json
 import os
@@ -16,29 +52,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.agent import build_graph
 from src.tools import search_tool, rag_tool
-
-
-"""
-Запуск одного эксперимента агента с выбранной конфигурацией тулзов на подмножестве валидации,
-и опционально прогон этой же конфигурации на всем подмножестве.
-
-Использование:
-- Выберите ровно один эксперимент через --experiment (no_tools, web_search, rag, web_search_rag).
-- Оценка на --sample-size (по умолчанию 50), опционально на --full-size (по умолчанию 500).
-
-Выход:
-- Печатает метрики только по распарсенным предиктам (accuracy, macro F1, precision, recall).
-- Сохраняет построчные предсказания в data/artifacts/agent_runs, если задан --output-dir.
-
-Ожидаемый вход:
-- JSONL валидации с полями: Text, name, address, normalized_main_rubric_name_ru,
-  prices_summarized, reviews_summarized, relevance_new.
-
-Примечания:
-- Метки бинарные (0/1). Любое неточное значение считается ошибкой парсинга.
-- Использование тулзов определяется выбранным экспериментом.
-"""
-
 
 ALLOWED_LABELS = [0.0, 1.0]
 EXPERIMENTS = {
@@ -261,7 +274,7 @@ def main() -> None:
     prompt = load_prompt(name)
 
     if args.use_full:
-        full_df = pd.read_json("data/raw/data_final_for_dls_eval_new", lines=True)
+        full_df = pd.read_json("data/raw/data_final_for_dls_eval_new.jsonl", lines=True)
         full_df = full_df[full_df["relevance_new"] != 0.1]
 
         print(f"\nRunning {name} on full size: {len(full_df)}")
@@ -319,40 +332,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-# hard = pd.read_json(Path("data/artifacts/faiss_split") / "tune_split_hard_examples.jsonl", lines=True)
-# val_df = pd.read_json(Path("data/artifacts/faiss_split") / "tune_split.jsonl", lines=True)
-
-# hard_lines = (
-#     hard["id"].dropna().astype(str).astype(int) - 1  # 1-based -> 0-based
-# )
-
-
-# val_df_hard = val_df.iloc[hard_lines].copy()
-# bad = val_df_hard[val_df_hard["relevance_new"] == 0.1]
-
-# print(f"bad count: {len(bad)}")
-# print(bad.to_string(index=False))
-
-# print("hard total:", len(hard))
-# print("hard unique ids:", hard_lines.nunique())
-# print("min/max id:", hard_lines.min()+1, hard_lines.max()+1)
-# print("val_df size:", len(val_df))
-
-# val_df_hard = val_df.iloc[hard_lines]
-# print("hard rows:", len(val_df_hard))
-# print("hard rows after rel!=0.1:", len(val_df_hard[val_df_hard['relevance_new'] != 0.1]))
-
-
-
-# set FAISS_INDEX_DIR=data/artifacts/faiss_full
-# python src/scripts/run_prediction.py --experiment rag
-
-
-
-# if os.getenv("RUN_PREDICTION_DEBUG") == "1":
-#     val_df = pd.read_json(Path("data/artifacts/val.jsonl"), lines=True)
-#     val_df = val_df[val_df["relevance_new"] != 0.1]
-#     sample_df = select_sample(val_df, 50, 42)
-#     print(sample_df.head(20))

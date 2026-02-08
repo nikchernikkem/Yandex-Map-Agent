@@ -1,7 +1,14 @@
+"""
+Бейзлайн TF-IDF + CatBoost для предсказания релевантности.
+
+Читает train/val JSONL, отфильтровывает строки с `relevance_new == 0.1`,
+строит TF-IDF по нескольким текстовым полям, обучает CatBoost и выводит
+accuracy/precision/recall/F1 на валидации.
+"""
+
 import argparse
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from catboost import CatBoostClassifier, Pool
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -23,14 +30,16 @@ def build_text(df: pd.DataFrame) -> pd.Series:
     return safe.astype(str).agg(" ".join, axis=1)
 
 
-def resolve_label(df: pd.DataFrame, preferred: str) -> pd.Series:
-    if preferred in df.columns:
-        return df[preferred]
+def resolve_label(df: pd.DataFrame) -> pd.Series:
     if "relevance_new" in df.columns:
         return df["relevance_new"]
-    if "relevance" in df.columns:
-        return df["relevance"]
-    raise KeyError("No label column found (expected relevance_new or relevance).")
+    raise KeyError("No label column found (expected relevance_new).")
+
+
+def drop_relevance_minus(df: pd.DataFrame) -> pd.DataFrame:
+    if "relevance_new" not in df.columns:
+        raise KeyError("No label column found (expected relevance_new).")
+    return df[df["relevance_new"] != 0.1]
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,14 +53,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--val-path",
         type=Path,
-        default=Path("data/raw/val.jsonl"),
+        default=Path("data/raw/data_final_for_dls_eval_new.jsonl"),
         help="Path to validation jsonl.",
-    )
-    parser.add_argument(
-        "--label-col",
-        type=str,
-        default="relevance_new",
-        help="Label column name (fallback: relevance_new -> relevance).",
     )
     parser.add_argument("--max-features", type=int, default=120000)
     parser.add_argument("--min-df", type=int, default=3)
@@ -62,8 +65,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--l2-leaf-reg", type=float, default=3.0)
     parser.add_argument("--random-seed", type=int, default=42)
     parser.add_argument("--threshold", type=float, default=0.5)
-
-    parser.add_argument("--task-type", type=str, default="GPU")
+    parser.add_argument(
+        "--task-type",
+        type=str,
+        default=None,
+        help="CatBoost task type, e.g. CPU or GPU (omit to use default).",
+    )
 
     return parser.parse_args()
 
@@ -74,8 +81,12 @@ def main() -> None:
     train_df = pd.read_json(args.train_path, lines=True)
     val_df = pd.read_json(args.val_path, lines=True)
 
-    y_train = resolve_label(train_df, args.label_col).astype(int)
-    y_val = resolve_label(val_df, args.label_col).astype(int)
+    train_df = drop_relevance_minus(train_df)
+    val_df = drop_relevance_minus(val_df)
+    print(len(train_df), len(val_df))
+
+    y_train = resolve_label(train_df).astype(int)
+    y_val = resolve_label(val_df).astype(int)
 
     train_text = build_text(train_df)
     val_text = build_text(val_df)
@@ -94,20 +105,23 @@ def main() -> None:
     train_pool = Pool(x_train, y_train)
     val_pool = Pool(x_val, y_val)
 
-    model = CatBoostClassifier(
+    model_kwargs = dict(
         iterations=args.iterations,
         depth=args.depth,
         learning_rate=args.learning_rate,
         l2_leaf_reg=args.l2_leaf_reg,
         loss_function="Logloss",
-        eval_metric="F1",
+        eval_metric="Accuracy",
         random_seed=args.random_seed,
         verbose=100,
         allow_writing_files=False,
-        task_type=args.task_type,
         od_type="Iter",
-        od_wait=150,
+        od_wait=300,
     )
+    if args.task_type:
+        model_kwargs["task_type"] = args.task_type
+
+    model = CatBoostClassifier(**model_kwargs)
 
     model.fit(train_pool, eval_set=val_pool, use_best_model=True)
 

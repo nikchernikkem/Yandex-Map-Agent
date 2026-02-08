@@ -1,3 +1,28 @@
+"""
+Сборка FAISS-индекса для RAG из train JSONL.
+
+Что делает:
+- Загружает полный train из `--train-path`.
+- В режиме `split` перемешивает, делит на train/val по `--split-frac`.
+- В режиме `full` использует весь train без деления.
+- Строит эмбеддинги и индекс через `FaissExampleRetriever.build(...)`.
+- Сохраняет индекс в `faiss.index` и метаданные в `faiss_meta.json`.
+- В режиме `split` сохраняет `train_split.jsonl` и `tune_split.jsonl`.
+
+Аргументы:
+- `--train-path` путь к train JSONL.
+- `--artifacts-dir` каталог для индекса и сплитов.
+- `--mode` `split` или `full`.
+- `--split-frac` доля train в режиме `split`.
+- `--seed` фиксирует перемешивание.
+
+Выходные файлы:
+- `<artifacts-dir>/faiss.index`
+- `<artifacts-dir>/faiss_meta.json`
+- `<artifacts-dir>/train_split.jsonl` (только `split`)
+- `<artifacts-dir>/tune_split.jsonl` (только `split`)
+"""
+
 import argparse
 import json
 import sys

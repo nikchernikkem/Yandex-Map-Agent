@@ -1,3 +1,17 @@
+"""
+Определение инструментов агента: веб-поиск и RAG-ретривер на FAISS.
+
+Что внутри:
+- `search_tool`: TavilySearchResults (нужен `TAVILY_API_KEY`).
+- `rag_tool`: обертка над FaissExampleRetriever, возвращает JSON со score/label.
+- FAISS индекс и метаданные читаются при импорте:
+  `FAISS_INDEX_DIR` либо `data/artifacts/faiss_split`.
+- Экспортируется список `tools = [search_tool, rag_tool]`.
+
+Примечание:
+- Файлы `faiss.index` и `faiss_meta.json` должны существовать до импорта.
+"""
+
 import json
 import os
 from pathlib import Path
