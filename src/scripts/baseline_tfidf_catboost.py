@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--val-path",
         type=Path,
-        default=Path("data/artifacts/val.jsonl"),
+        default=Path("data/raw/val.jsonl"),
         help="Path to validation jsonl.",
     )
     parser.add_argument(

@@ -26,23 +26,23 @@ AVAILABLE TOOLS
 2) web_search(query)
    - Returns web snippets/sources (may be noisy/incomplete).
 
-WHEN AND HOW TO USE TOOLS
-- FIRST always read the organization fields and attempt a decision without tools.
-- Use retrieve_similar_examples only if the decision remains genuinely borderline after reading fields:
-  - rubric seems relevant but a key requirement is unclear,
-  - text fields are sparse/empty,
-  - signals conflict.
-  Limit: at most 1 RAG call per sample.
-- Use web_search only if:
-  - the query requires a specific hard attribute (e.g., “MRI”, “halal”, “24/7”, “terrace”) and the fields do not confirm it,
-  - you have enough identifiers (at least name + city/address) to search reliably.
-  Limit: at most 1 web_search call per sample.
-- If RAG already suggests negative/borderline outcomes (e.g., similar cases go to 0.0 or are weak), do NOT use web_search just to force a 1.0.
+TOOL STRATEGY
+0) Quick reject (no tools) only if obvious:
+   - clear location mismatch vs address => 0.0
+   - clear category mismatch (intent vs rubric) and prices/reviews don’t mention the requested service => 0.0
+1) Default: call retrieve_similar_examples early with k=5 (most non-trivial cases).
+   - If results are clearly off-intent, you may do 1 refined RAG call (max 2 total).
+2) Web verification (max 1 call) if:
+   - query has a “hard requirement” (24/7, halal/vegan, MRI, terrace, delivery, parking, wheelchair, etc.), OR
+   - record is sparse/conflicting, OR
+   - you’re about to output 1.0 but the key requirement isn’t explicitly confirmed in fields, OR
+   - name is generic/chain and branch identity is uncertain.
+   Use a precise query: name + city/address + key requirement.
 
 STRICT EVIDENCE RULES
 - Use ONLY input fields and tool outputs.
 - NEVER invent facts about the organization.
-- Confirm hard requirements only via explicit mentions in fields or in credible tool evidence.
+- Confirm hard requirements only via explicit mentions in fields or in credible tool evidence that clearly refers to the SAME organization.
 - If the key requirement is not explicitly confirmed, choose 0.0.
 
 DECISION HEURISTICS
@@ -67,9 +67,9 @@ USING WEB SEARCH
 - In evidence, include a short quote and set field="tool".
 
 CONFIDENCE
-- 0.8–1.0: multiple independent strong signals (fields + optionally tools).
-- 0.5–0.79: some evidence, but imperfect; label 1.0 only if still clearly matches.
-- 0.0–0.49: weak/noisy signals => typically 0.0.
+- 0.8–1.0: strong explicit match; tools (if used) confirm the key requirement.
+- 0.5–0.79: some explicit evidence but imperfect (still output 1.0 only if clearly matches).
+- 0.0–0.49: weak/noisy/indirect evidence => typically 0.0.
 
 OUTPUT FORMAT (strict valid JSON; no extra text)
 Return exactly:

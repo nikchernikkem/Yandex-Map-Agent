@@ -1,7 +1,9 @@
 import argparse
 import json
+import os
 import re
 import sys
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -41,25 +43,29 @@ from src.tools import search_tool, rag_tool
 ALLOWED_LABELS = [0.0, 1.0]
 EXPERIMENTS = {
     "no_tools": [],
-    "web_search": [search_tool],
-    "rag": [rag_tool],
+    # "web_search": [search_tool],
+    # "rag": [rag_tool],
     "web_search_rag": [search_tool, rag_tool],
+    "web_search_rag_strong": [search_tool, rag_tool],
 }
 PROMPT_FILES = {
     "no_tools": PROJECT_ROOT / "src" / "prompts" / "system_prompt_base.jinja",
-    "web_search": PROJECT_ROOT / "src" / "prompts" / "system_prompt_web.jinja",
-    "rag": PROJECT_ROOT / "src" / "prompts" / "system_prompt_rag.jinja",
+    # "web_search": PROJECT_ROOT / "src" / "prompts" / "system_prompt_web.jinja",
+    # "rag": PROJECT_ROOT / "src" / "prompts" / "system_prompt_rag.jinja",
     "web_search_rag": PROJECT_ROOT / "src" / "prompts" / "system_prompt_tools.jinja",
+    "web_search_rag_strong": PROJECT_ROOT / "src" / "prompts" / "system_prompt_tools_2.jinja"
 }
-
+OUTPUT_DIR = Path("logs/agent_runs")
+MAX_RETRIES = 3
+RETRY_SLEEP_BASE_S = 2
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Agent experiments with tool configs.")
     parser.add_argument(
         "--val-path",
         type=Path,
-        default=Path("data/artifacts/val.jsonl"),
-        help="Path to validation jsonl.",
+        default=Path("data/artifacts/faiss_split"),
+        help="Path to validation folder with tune_split*.jsonl files.",
     )
     parser.add_argument("--sample-size", type=int, default=50, help="Sample size for experiment.")
     parser.add_argument("--use-full", action="store_true", help="Using full val df for final run.")
@@ -70,12 +76,6 @@ def parse_args() -> argparse.Namespace:
         choices=sorted(EXPERIMENTS.keys()),
         default="no_tools",
         help="Which experiment to run.",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("data/artifacts/agent_runs"),
-        help="Directory to store predictions.",
     )
     parser.add_argument(
         "--progress-every",
@@ -137,9 +137,20 @@ def predict_one(row: pd.Series, graph):
     payload = row_to_agent_input(row)
     prompt = json.dumps(payload, ensure_ascii=False)
 
-    out_state = graph.invoke({"messages": [HumanMessage(content=prompt)]})
-    final_msg = out_state["messages"][-1]
-    raw = final_msg.content if hasattr(final_msg, "content") else None
+    last_err = None
+    raw = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            out_state = graph.invoke({"messages": [HumanMessage(content=prompt)]})
+            final_msg = out_state["messages"][-1]
+            raw = final_msg.content if hasattr(final_msg, "content") else None
+            last_err = None
+            break
+        except Exception as exc:
+            last_err = exc
+            time.sleep(min(RETRY_SLEEP_BASE_S ** attempt, 10))
+    if last_err is not None:
+        raise last_err
 
     parsed = extract_json_from_text(raw if raw else "")
     pred_label = coerce_label(parsed.get("relevance")) if parsed else None
@@ -157,7 +168,7 @@ def select_sample(df: pd.DataFrame, n: int, seed: int) -> pd.DataFrame:
     return df.sample(n=n, random_state=seed).copy()
 
 
-def evaluate_df(df: pd.DataFrame, graph, progress_every: int = 25):
+def evaluate_df(df: pd.DataFrame, graph, progress_every: int = 25, output_path: Path | None = None):
     y_true = []
     y_pred = []
     rows = []
@@ -182,6 +193,8 @@ def evaluate_df(df: pd.DataFrame, graph, progress_every: int = 25):
                 "pred_parsed": res["pred_parsed"],
             }
         )
+        if output_path is not None:
+            save_jsonl(rows[-1], output_path)
 
         if progress_every and i % progress_every == 0:
             print(f"Processed {i}/{len(df)}")
@@ -214,9 +227,12 @@ def evaluate_df(df: pd.DataFrame, graph, progress_every: int = 25):
 
 def save_jsonl(rows, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    with path.open("a", encoding="utf-8") as f:
+        if isinstance(rows, list):
+            for row in rows:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        else:
+            f.write(json.dumps(rows, ensure_ascii=False) + "\n")
 
 def print_metrics(name: str, metrics: dict) -> None:
     print(
@@ -237,23 +253,45 @@ def main() -> None:
     # ----------------------------
     # Load val_data
     # ----------------------------
-    val_df = pd.read_json(args.val_path, lines=True)
-    val_df = val_df[val_df["relevance_new"] != 0.1]
+    # val_df = pd.read_json(args.val_path, lines=True)
+    # val_df = val_df[val_df["relevance_new"] != 0.1]
 
     name = args.experiment
     tools = EXPERIMENTS[name]
     prompt = load_prompt(name)
 
     if args.use_full:
-        full_df = val_df.copy()
+        full_df = pd.read_json("data/raw/data_final_for_dls_eval_new", lines=True)
+        full_df = full_df[full_df["relevance_new"] != 0.1]
+
         print(f"\nRunning {name} on full size: {len(full_df)}")
         graph = build_graph(tools, system_prompt=prompt)
-        metrics, rows = evaluate_df(full_df, graph, progress_every=args.progress_every)
+        output_path = OUTPUT_DIR / f"{name}_full.jsonl"
+        metrics, rows = evaluate_df(
+            full_df, graph, progress_every=args.progress_every, output_path=output_path
+        )
         print_metrics(f"{name}_full", metrics)
-        if args.output_dir:
-            save_jsonl(rows, args.output_dir / f"{name}_full.jsonl")
+        metrics_path = OUTPUT_DIR / f"{name}_full_metrics.jsonl"
+        save_jsonl(
+            {
+                "experiment": name,
+                "mode": "full",
+                "total": metrics["total"],
+                "metrics": metrics,
+            },
+            metrics_path,
+        )
 
-    else:
+    else: 
+        hard = pd.read_json(args.val_path / "tune_split_hard_examples.jsonl", lines=True)
+        val_df = pd.read_json(args.val_path / "tune_split.jsonl", lines=True)
+
+        hard_lines = (
+            hard["id"].dropna().astype(str).astype(int) - 1
+        )
+        val_df = val_df.iloc[hard_lines]
+
+        val_df = val_df[val_df["relevance_new"] != 0.1]
         sample_df = select_sample(val_df, args.sample_size, args.seed)
 
         print(f"Validation size: {len(val_df)}")
@@ -261,12 +299,60 @@ def main() -> None:
 
         print(f"\nRunning experiment: {name}")
         graph = build_graph(tools, system_prompt=prompt)
-        metrics, rows = evaluate_df(sample_df, graph, progress_every=args.progress_every)
+        output_path = OUTPUT_DIR / f"{name}_{args.sample_size}_sample.jsonl"
+        metrics, rows = evaluate_df(
+            sample_df, graph, progress_every=args.progress_every, output_path=output_path
+        )
         print_metrics(name, metrics)
-
-        if args.output_dir:
-            save_jsonl(rows, args.output_dir / f"{name}_sample.jsonl")
+        metrics_path = OUTPUT_DIR / f"{name}_{args.sample_size}_metrics.jsonl"
+        save_jsonl(
+            {
+                "experiment": name,
+                "mode": "sample",
+                "sample_size": args.sample_size,
+                "total": metrics["total"],
+                "metrics": metrics,
+            },
+            metrics_path,
+        )
 
 
 if __name__ == "__main__":
     main()
+
+
+# hard = pd.read_json(Path("data/artifacts/faiss_split") / "tune_split_hard_examples.jsonl", lines=True)
+# val_df = pd.read_json(Path("data/artifacts/faiss_split") / "tune_split.jsonl", lines=True)
+
+# hard_lines = (
+#     hard["id"].dropna().astype(str).astype(int) - 1  # 1-based -> 0-based
+# )
+
+
+# val_df_hard = val_df.iloc[hard_lines].copy()
+# bad = val_df_hard[val_df_hard["relevance_new"] == 0.1]
+
+# print(f"bad count: {len(bad)}")
+# print(bad.to_string(index=False))
+
+# print("hard total:", len(hard))
+# print("hard unique ids:", hard_lines.nunique())
+# print("min/max id:", hard_lines.min()+1, hard_lines.max()+1)
+# print("val_df size:", len(val_df))
+
+# val_df_hard = val_df.iloc[hard_lines]
+# print("hard rows:", len(val_df_hard))
+# print("hard rows after rel!=0.1:", len(val_df_hard[val_df_hard['relevance_new'] != 0.1]))
+
+
+
+# set FAISS_INDEX_DIR=data/artifacts/faiss_full
+# python src/scripts/run_prediction.py --experiment rag
+
+
+
+# if os.getenv("RUN_PREDICTION_DEBUG") == "1":
+#     val_df = pd.read_json(Path("data/artifacts/val.jsonl"), lines=True)
+#     val_df = val_df[val_df["relevance_new"] != 0.1]
+#     sample_df = select_sample(val_df, 50, 42)
+#     print(sample_df.head(20))

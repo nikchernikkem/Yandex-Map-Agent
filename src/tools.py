@@ -26,7 +26,8 @@ search_tool = TavilySearchResults(
 
 # Retriever для few-shot
 
-ARTIFACTS_DIR = Path("data") / "artifacts"
+INDEX_DIR = os.getenv("FAISS_INDEX_DIR")
+ARTIFACTS_DIR = Path(INDEX_DIR) if INDEX_DIR else Path("data") / "artifacts" / "faiss_split"
 INDEX_PATH = ARTIFACTS_DIR / "faiss.index"
 META_PATH = ARTIFACTS_DIR / "faiss_meta.json"
 
