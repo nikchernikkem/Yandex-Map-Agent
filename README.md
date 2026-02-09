@@ -109,11 +109,11 @@ export FAISS_INDEX_DIR=data/artifacts/faiss_full
 python src/scripts/run_prediction.py --experiment web_search_rag --use-full
 ```
 
-# Результаты бейзлайна
+## Результаты бейзлайна
 
 - Baseline (TF-IDF + CatBoost, `baseline.ipynb`): val size = 500, accuracy = 0.8700, precision = 0.9013, recall = 0.8927, F1 = 0.8970.
 
-# Эксперименты и результаты LLM-агента
+## Эксперименты и результаты LLM-агента
 
 ## Что сравнивали
 Один и тот же сэмпл из 50 строк прогонялся в 3 режимах, плюс финальный прогон на всей валидации (500 строк):
